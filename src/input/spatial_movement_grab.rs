@@ -82,7 +82,7 @@ impl PointerGrab<State> for SpatialMovementGrab {
                     if c.x.abs() > c.y.abs() {
                         self.gesture = GestureState::ViewOffset;
                         layout.view_offset_gesture_begin(&self.output, false);
-                        layout.view_offset_gesture_update(-c.x * 3.0, timestamp, false)
+                        layout.view_offset_gesture_update(-c.x * 2.5, timestamp, false)
                     } else {
                         self.gesture = GestureState::WorkspaceSwitch;
                         layout.workspace_switch_gesture_begin(&self.output, false);
@@ -93,7 +93,7 @@ impl PointerGrab<State> for SpatialMovementGrab {
                 }
             }
             GestureState::ViewOffset => {
-                layout.view_offset_gesture_update(-delta.x * 3.0, timestamp, false)
+                layout.view_offset_gesture_update(-delta.x * 2.5, timestamp, false)
             }
             GestureState::WorkspaceSwitch => {
                 layout.workspace_switch_gesture_update(-delta.y, timestamp, false)
