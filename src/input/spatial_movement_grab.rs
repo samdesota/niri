@@ -66,10 +66,10 @@ impl PointerGrab<State> for SpatialMovementGrab {
         event: &MotionEvent,
     ) {
         // While the grab is active, no client has pointer focus.
-        handle.motion(data, None, event);
+        //handle.motion(data, None, event);
 
         let timestamp = Duration::from_millis(u64::from(event.time));
-        let delta = event.location - self.last_location;
+        let delta = event.location - self.start_data.location;
         self.last_location = event.location;
 
         let layout = &mut data.niri.layout;
@@ -82,7 +82,7 @@ impl PointerGrab<State> for SpatialMovementGrab {
                     if c.x.abs() > c.y.abs() {
                         self.gesture = GestureState::ViewOffset;
                         layout.view_offset_gesture_begin(&self.output, false);
-                        layout.view_offset_gesture_update(-c.x, timestamp, false)
+                        layout.view_offset_gesture_update(-c.x * 3.0, timestamp, false)
                     } else {
                         self.gesture = GestureState::WorkspaceSwitch;
                         layout.workspace_switch_gesture_begin(&self.output, false);
@@ -93,7 +93,7 @@ impl PointerGrab<State> for SpatialMovementGrab {
                 }
             }
             GestureState::ViewOffset => {
-                layout.view_offset_gesture_update(-delta.x, timestamp, false)
+                layout.view_offset_gesture_update(-delta.x * 3.0, timestamp, false)
             }
             GestureState::WorkspaceSwitch => {
                 layout.workspace_switch_gesture_update(-delta.y, timestamp, false)

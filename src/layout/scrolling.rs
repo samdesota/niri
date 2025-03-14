@@ -2972,6 +2972,11 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             return false;
         }
 
+        // HACK(sdesota) Disable snapping windows by default
+        if true {
+            return true;
+        }
+
         // We do not handle cancelling, just like GNOME Shell doesn't. For this gesture, proper
         // cancelling would require keeping track of the original active column, and then updating
         // it in all the right places (adding columns, removing columns, etc.) -- quite a bit of

@@ -1,0 +1,20 @@
+// Folder-specific settings
+//
+// For a full list of overridable settings, and general information on folder-specific settings,
+// see the documentation: https://zed.dev/docs/configuring-zed#settings-files
+{
+  "languages": {
+    "Rust": {
+      "language_servers": ["rust-analyzer"]
+    }
+  },
+
+  "lsp": {
+    "rust-analyzer": {
+      "binary": {
+        "path": "/run/current-system/sw/bin/bash",
+        "arguments": ["-c", "nix develop -c rust-analyzer"]
+      }
+    }
+  }
+}
