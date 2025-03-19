@@ -15,6 +15,7 @@ use crate::niri::State;
 pub struct SpatialMovementGrab {
     start_data: PointerGrabStartData<State>,
     last_location: Point<f64, Logical>,
+    total_delta: Point<f64, Logical>,
     output: Output,
     gesture: GestureState,
 }
@@ -31,6 +32,7 @@ impl SpatialMovementGrab {
         Self {
             last_location: start_data.location,
             start_data,
+            total_delta: Point::from((0., 0.)),
             output,
             gesture: GestureState::Recognizing,
         }
@@ -71,22 +73,24 @@ impl PointerGrab<State> for SpatialMovementGrab {
         let timestamp = Duration::from_millis(u64::from(event.time));
         let delta = event.location - self.start_data.location;
         self.last_location = event.location;
+        self.total_delta = self.total_delta + delta;
 
         let layout = &mut data.niri.layout;
         let res = match self.gesture {
             GestureState::Recognizing => {
-                let c = event.location - self.start_data.location;
+                let dx = self.total_delta.x;
+                let dy = self.total_delta.y;
 
                 // Check if the gesture moved far enough to decide. Threshold copied from GTK 4.
-                if c.x * c.x + c.y * c.y >= 8. * 8. {
-                    if c.x.abs() > c.y.abs() {
+                if dx * dx + dy * dy >= 8. * 8. {
+                    if dx.abs() > dy.abs() {
                         self.gesture = GestureState::ViewOffset;
                         layout.view_offset_gesture_begin(&self.output, false);
-                        layout.view_offset_gesture_update(-c.x * 2.5, timestamp, false)
+                        layout.view_offset_gesture_update(-dx * 2.5, timestamp, false)
                     } else {
                         self.gesture = GestureState::WorkspaceSwitch;
                         layout.workspace_switch_gesture_begin(&self.output, false);
-                        layout.workspace_switch_gesture_update(-c.y, timestamp, false)
+                        layout.workspace_switch_gesture_update(-dy, timestamp, false)
                     }
                 } else {
                     Some(None)
