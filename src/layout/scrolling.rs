@@ -3000,9 +3000,9 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         }
 
         // HACK(sdesota) Disable snapping windows by default
-        if true {
-            return true;
-        }
+        // if true {
+        //     return true;
+        // }
 
         // We do not handle cancelling, just like GNOME Shell doesn't. For this gesture, proper
         // cancelling would require keeping track of the original active column, and then updating
@@ -3246,20 +3246,22 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             self.view_offset_before_fullscreen = None;
         }
 
-        self.active_column_idx = new_col_idx;
+        // self.active_column_idx = new_col_idx;
 
-        let target_view_offset = target_snap.view_pos - new_col_x;
+        // let target_view_offset = target_snap.view_pos - new_col_x;
 
-        self.view_offset = ViewOffset::Animation(Animation::new(
-            self.clock.clone(),
-            current_view_offset + delta,
-            target_view_offset,
-            velocity,
-            self.options.animations.horizontal_view_movement.0,
-        ));
+        self.view_offset = ViewOffset::Static(current_view_offset);
 
-        // HACK: deal with things like snapping to the right edge of a larger-than-view window.
-        self.animate_view_offset_to_column(None, new_col_idx, None);
+        // self.view_offset = ViewOffset::Animation(Animation::new(
+        //     self.clock.clone(),
+        //     current_view_offset + delta,
+        //     target_view_offset,
+        //     velocity,
+        //     self.options.animations.horizontal_view_movement.0,
+        // ));
+
+        // // HACK: deal with things like snapping to the right edge of a larger-than-view window.
+        // self.animate_view_offset_to_column(None, new_col_idx, None);
 
         true
     }
