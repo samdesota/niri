@@ -112,7 +112,7 @@ pub enum InsertPosition {
 
 #[derive(Debug, PartialEq)]
 pub enum ScrollColumnIntoViewport {
-    AsConfigured,
+    WhenFreeScrollDisabled,
     Always,
 }
 
@@ -938,7 +938,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         if activate {
             target_column.activate_idx(tile_idx);
             if self.active_column_idx != col_idx {
-                self.activate_column(col_idx, ScrollColumnIntoViewport::AsConfigured);
+                self.activate_column(col_idx, ScrollColumnIntoViewport::WhenFreeScrollDisabled);
             }
         }
 
@@ -1392,7 +1392,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     col_idx,
                     None,
                     config,
-                    ScrollColumnIntoViewport::AsConfigured,
+                    ScrollColumnIntoViewport::WhenFreeScrollDisabled,
                 );
             }
         }
@@ -1415,7 +1415,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             Some(target_x),
             column_idx,
             Some(self.active_column_idx),
-            ScrollColumnIntoViewport::AsConfigured,
+            ScrollColumnIntoViewport::WhenFreeScrollDisabled,
         );
 
         let new_col_x = self.column_x(column_idx);
@@ -1445,7 +1445,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         let column = &mut self.columns[column_idx];
 
         column.activate_window(window);
-        self.activate_column(column_idx, ScrollColumnIntoViewport::AsConfigured);
+        self.activate_column(column_idx, ScrollColumnIntoViewport::WhenFreeScrollDisabled);
 
         true
     }
@@ -3384,7 +3384,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     None,
                     self.active_column_idx,
                     None,
-                    ScrollColumnIntoViewport::AsConfigured,
+                    ScrollColumnIntoViewport::WhenFreeScrollDisabled,
                 );
             }
             return;
@@ -3505,7 +3505,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     None,
                     self.active_column_idx,
                     None,
-                    ScrollColumnIntoViewport::AsConfigured,
+                    ScrollColumnIntoViewport::WhenFreeScrollDisabled,
                 );
             }
         }
@@ -5132,7 +5132,7 @@ fn compute_new_view_offset(
             new_col_width,
             gaps,
         ),
-        ScrollColumnIntoViewport::AsConfigured => -(new_col_x - cur_x),
+        ScrollColumnIntoViewport::WhenFreeScrollDisabled => -(new_col_x - cur_x),
     }
 }
 
