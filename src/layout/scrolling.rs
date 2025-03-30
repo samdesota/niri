@@ -3,6 +3,7 @@ use std::iter::{self, zip};
 use std::rc::Rc;
 use std::time::Duration;
 
+use input::ScrollMethod;
 use niri_config::{CenterFocusedColumn, CornerRadius, PresetSize, Struts};
 use niri_ipc::{ColumnDisplay, SizeChange};
 use ordered_float::NotNan;
@@ -38,6 +39,8 @@ pub struct ScrollingSpace<W: LayoutElement> {
 
     /// Index of the currently active column, if any.
     active_column_idx: usize,
+
+    scroll_new_active_column_into_viewport: bool,
 
     /// Ongoing interactive resize.
     interactive_resize: Option<InteractiveResize<W>>,
@@ -105,6 +108,12 @@ pub enum InsertPosition {
     NewColumn(usize),
     InColumn(usize, usize),
     Floating,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ScrollColumnIntoViewport {
+    AsConfigured,
+    Always,
 }
 
 #[derive(Debug)]
@@ -280,6 +289,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             columns: Vec::new(),
             data: Vec::new(),
             active_column_idx: 0,
+            scroll_new_active_column_into_viewport: true,
             interactive_resize: None,
             view_offset: ViewOffset::Static(0.),
             activate_prev_column_on_removal: None,
@@ -537,6 +547,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         col_x: f64,
         width: f64,
         is_fullscreen: bool,
+        scroll_behavior: ScrollColumnIntoViewport,
     ) -> f64 {
         if is_fullscreen {
             return 0.;
@@ -550,6 +561,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             col_x,
             width,
             self.options.gaps,
+            scroll_behavior,
         );
 
         // Non-fullscreen windows are always offset at least by the working area position.
@@ -564,24 +576,42 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         is_fullscreen: bool,
     ) -> f64 {
         if is_fullscreen {
-            return self.compute_new_view_offset_fit(target_x, col_x, width, is_fullscreen);
+            return self.compute_new_view_offset_fit(
+                target_x,
+                col_x,
+                width,
+                is_fullscreen,
+                ScrollColumnIntoViewport::Always,
+            );
         }
 
         // Columns wider than the view are left-aligned (the fit code can deal with that).
         if self.working_area.size.w <= width {
-            return self.compute_new_view_offset_fit(target_x, col_x, width, is_fullscreen);
+            return self.compute_new_view_offset_fit(
+                target_x,
+                col_x,
+                width,
+                is_fullscreen,
+                ScrollColumnIntoViewport::Always,
+            );
         }
 
         -(self.working_area.size.w - width) / 2. - self.working_area.loc.x
     }
 
-    fn compute_new_view_offset_for_column_fit(&self, target_x: Option<f64>, idx: usize) -> f64 {
+    fn compute_new_view_offset_for_column_fit(
+        &self,
+        target_x: Option<f64>,
+        idx: usize,
+        scroll_behavior: ScrollColumnIntoViewport,
+    ) -> f64 {
         let col = &self.columns[idx];
         self.compute_new_view_offset_fit(
             target_x,
             self.column_x(idx),
             col.width(),
             col.is_fullscreen,
+            scroll_behavior,
         )
     }
 
@@ -604,6 +634,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         target_x: Option<f64>,
         idx: usize,
         prev_idx: Option<usize>,
+        scroll_behavior: ScrollColumnIntoViewport,
     ) -> f64 {
         if self.is_centering_focused_column() {
             return self.compute_new_view_offset_for_column_centered(target_x, idx);
@@ -615,7 +646,11 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             }
             CenterFocusedColumn::OnOverflow => {
                 let Some(prev_idx) = prev_idx else {
-                    return self.compute_new_view_offset_for_column_fit(target_x, idx);
+                    return self.compute_new_view_offset_for_column_fit(
+                        target_x,
+                        idx,
+                        ScrollColumnIntoViewport::Always,
+                    );
                 };
 
                 // Always take the left or right neighbor of the target as the source.
@@ -641,13 +676,17 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
                 // If it fits together, do a normal animation, otherwise center the new column.
                 if total_width <= self.working_area.size.w {
-                    self.compute_new_view_offset_for_column_fit(target_x, idx)
+                    self.compute_new_view_offset_for_column_fit(
+                        target_x,
+                        idx,
+                        ScrollColumnIntoViewport::Always,
+                    )
                 } else {
                     self.compute_new_view_offset_for_column_centered(target_x, idx)
                 }
             }
             CenterFocusedColumn::Never => {
-                self.compute_new_view_offset_for_column_fit(target_x, idx)
+                self.compute_new_view_offset_for_column_fit(target_x, idx, scroll_behavior)
             }
         }
     }
@@ -710,8 +749,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         idx: usize,
         prev_idx: Option<usize>,
         config: niri_config::Animation,
+        scroll_behavior: ScrollColumnIntoViewport,
     ) {
-        let new_view_offset = self.compute_new_view_offset_for_column(target_x, idx, prev_idx);
+        let new_view_offset =
+            self.compute_new_view_offset_for_column(target_x, idx, prev_idx, scroll_behavior);
         self.animate_view_offset_with_config(idx, new_view_offset, config);
     }
 
@@ -720,23 +761,31 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         target_x: Option<f64>,
         idx: usize,
         prev_idx: Option<usize>,
+        scroll_behavior: ScrollColumnIntoViewport,
     ) {
         self.animate_view_offset_to_column_with_config(
             target_x,
             idx,
             prev_idx,
             self.options.animations.horizontal_view_movement.0,
+            scroll_behavior,
         )
     }
 
-    fn activate_column(&mut self, idx: usize) {
+    fn activate_column(&mut self, idx: usize, scroll_behavior: ScrollColumnIntoViewport) {
         self.activate_column_with_anim_config(
             idx,
             self.options.animations.horizontal_view_movement.0,
+            scroll_behavior,
         );
     }
 
-    fn activate_column_with_anim_config(&mut self, idx: usize, config: niri_config::Animation) {
+    fn activate_column_with_anim_config(
+        &mut self,
+        idx: usize,
+        config: niri_config::Animation,
+        scroll_behavior: ScrollColumnIntoViewport,
+    ) {
         if self.active_column_idx == idx {
             return;
         }
@@ -746,6 +795,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             idx,
             Some(self.active_column_idx),
             config,
+            scroll_behavior,
         );
 
         self.active_column_idx = idx;
@@ -888,7 +938,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         if activate {
             target_column.activate_idx(tile_idx);
             if self.active_column_idx != col_idx {
-                self.activate_column(col_idx);
+                self.activate_column(col_idx, ScrollColumnIntoViewport::AsConfigured);
             }
         }
 
@@ -968,8 +1018,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             // view_offset was left over and skip the animation.
             if was_empty {
                 self.view_offset = ViewOffset::Static(0.);
-                self.view_offset =
-                    ViewOffset::Static(self.compute_new_view_offset_for_column(None, idx, None));
+                self.view_offset = ViewOffset::Static(self.compute_new_view_offset_for_column(
+                    None,
+                    idx,
+                    None,
+                    ScrollColumnIntoViewport::Always,
+                ));
             }
 
             let prev_offset = (!was_empty && idx == self.active_column_idx + 1)
@@ -977,7 +1031,11 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
             let anim_config =
                 anim_config.unwrap_or(self.options.animations.horizontal_view_movement.0);
-            self.activate_column_with_anim_config(idx, anim_config);
+            self.activate_column_with_anim_config(
+                idx,
+                anim_config,
+                ScrollColumnIntoViewport::Always,
+            );
             self.activate_prev_column_on_removal = prev_offset;
         } else if !was_empty && idx <= self.active_column_idx {
             self.active_column_idx += 1;
@@ -1192,7 +1250,11 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             if 0 < column_idx {
                 let prev_offset = self.activate_prev_column_on_removal.unwrap();
 
-                self.activate_column_with_anim_config(self.active_column_idx - 1, view_config);
+                self.activate_column_with_anim_config(
+                    self.active_column_idx - 1,
+                    view_config,
+                    ScrollColumnIntoViewport::Always,
+                );
 
                 // Restore the view offset but make sure to scroll the view in case the
                 // previous window had resized.
@@ -1206,12 +1268,14 @@ impl<W: LayoutElement> ScrollingSpace<W> {
                     self.active_column_idx,
                     None,
                     view_config,
+                    ScrollColumnIntoViewport::Always,
                 );
             }
         } else {
             self.activate_column_with_anim_config(
                 min(self.active_column_idx, self.columns.len() - 1),
                 view_config,
+                ScrollColumnIntoViewport::Always,
             );
         }
 
@@ -1323,7 +1387,13 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
                 // FIXME: we will want to skip the animation in some cases here to make continuously
                 // resizing windows not look janky.
-                self.animate_view_offset_to_column_with_config(None, col_idx, None, config);
+                self.animate_view_offset_to_column_with_config(
+                    None,
+                    col_idx,
+                    None,
+                    config,
+                    ScrollColumnIntoViewport::AsConfigured,
+                );
             }
         }
     }
@@ -1345,6 +1415,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             Some(target_x),
             column_idx,
             Some(self.active_column_idx),
+            ScrollColumnIntoViewport::AsConfigured,
         );
 
         let new_col_x = self.column_x(column_idx);
@@ -1361,7 +1432,20 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         let column = &mut self.columns[column_idx];
 
         column.activate_window(window);
-        self.activate_column(column_idx);
+        self.activate_column(column_idx, ScrollColumnIntoViewport::Always);
+
+        true
+    }
+
+    pub fn activate_window_from_mouse_focus(&mut self, window: &W::Id) -> bool {
+        let column_idx = self.columns.iter().position(|col| col.contains(window));
+        let Some(column_idx) = column_idx else {
+            return false;
+        };
+        let column = &mut self.columns[column_idx];
+
+        column.activate_window(window);
+        self.activate_column(column_idx, ScrollColumnIntoViewport::AsConfigured);
 
         true
     }
@@ -1473,7 +1557,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         if self.active_column_idx == 0 {
             return false;
         }
-        self.activate_column(self.active_column_idx - 1);
+        self.activate_column(self.active_column_idx - 1, ScrollColumnIntoViewport::Always);
         true
     }
 
@@ -1482,12 +1566,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             return false;
         }
 
-        self.activate_column(self.active_column_idx + 1);
+        self.activate_column(self.active_column_idx + 1, ScrollColumnIntoViewport::Always);
         true
     }
 
     pub fn focus_column_first(&mut self) {
-        self.activate_column(0);
+        self.activate_column(0, ScrollColumnIntoViewport::Always);
     }
 
     pub fn focus_column_last(&mut self) {
@@ -1495,7 +1579,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             return;
         }
 
-        self.activate_column(self.columns.len() - 1);
+        self.activate_column(self.columns.len() - 1, ScrollColumnIntoViewport::Always);
     }
 
     pub fn focus_column(&mut self, index: usize) {
@@ -1503,7 +1587,10 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             return;
         }
 
-        self.activate_column(index.saturating_sub(1).min(self.columns.len() - 1));
+        self.activate_column(
+            index.saturating_sub(1).min(self.columns.len() - 1),
+            ScrollColumnIntoViewport::Always,
+        );
     }
 
     pub fn focus_window_in_column(&mut self, index: u8) {
@@ -1633,7 +1720,11 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             }
         }
 
-        self.activate_column_with_anim_config(new_idx, self.options.animations.window_movement.0);
+        self.activate_column_with_anim_config(
+            new_idx,
+            self.options.animations.window_movement.0,
+            ScrollColumnIntoViewport::Always,
+        );
     }
 
     pub fn move_left(&mut self) -> bool {
@@ -2076,7 +2167,7 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             .animate_move_from(target_pt - source_pt);
         self.columns[source_column_idx].tiles[source_tile_idx].ensure_alpha_animates_to_1();
 
-        self.activate_column(target_column_idx);
+        self.activate_column(target_column_idx, ScrollColumnIntoViewport::Always);
     }
 
     pub fn toggle_column_tabbed_display(&mut self) {
@@ -2361,7 +2452,13 @@ impl<W: LayoutElement> ScrollingSpace<W> {
             let view_offset = if self.is_centering_focused_column() {
                 self.compute_new_view_offset_centered(Some(0.), 0., hint_area.size.w, false)
             } else {
-                self.compute_new_view_offset_fit(Some(0.), 0., hint_area.size.w, false)
+                self.compute_new_view_offset_fit(
+                    Some(0.),
+                    0.,
+                    hint_area.size.w,
+                    false,
+                    ScrollColumnIntoViewport::Always,
+                )
             };
             hint_area.loc.x -= view_offset;
         } else {
@@ -2642,7 +2739,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
         let new_view_x = leftmost_col_x.unwrap() - gap - working_x;
         self.animate_view_offset(self.active_column_idx, new_view_x - active_col_x.unwrap());
         // Just in case.
-        self.animate_view_offset_to_column(None, self.active_column_idx, None);
+        self.animate_view_offset_to_column(
+            None,
+            self.active_column_idx,
+            None,
+            ScrollColumnIntoViewport::Always,
+        );
     }
 
     pub fn set_fullscreen(&mut self, window: &W::Id, is_fullscreen: bool) -> bool {
@@ -3278,7 +3380,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
             if !self.columns.is_empty() {
                 // Just in case, make sure the active window remains on screen.
-                self.animate_view_offset_to_column(None, self.active_column_idx, None);
+                self.animate_view_offset_to_column(
+                    None,
+                    self.active_column_idx,
+                    None,
+                    ScrollColumnIntoViewport::AsConfigured,
+                );
             }
             return;
         }
@@ -3394,7 +3501,12 @@ impl<W: LayoutElement> ScrollingSpace<W> {
 
             // Animate the active window into view right away.
             if self.columns[self.active_column_idx].contains(window) {
-                self.animate_view_offset_to_column(None, self.active_column_idx, None);
+                self.animate_view_offset_to_column(
+                    None,
+                    self.active_column_idx,
+                    None,
+                    ScrollColumnIntoViewport::AsConfigured,
+                );
             }
         }
 
@@ -5005,6 +5117,26 @@ impl<W: LayoutElement> Column<W> {
 }
 
 fn compute_new_view_offset(
+    cur_x: f64,
+    view_width: f64,
+    new_col_x: f64,
+    new_col_width: f64,
+    gaps: f64,
+    scroll_behavior: ScrollColumnIntoViewport,
+) -> f64 {
+    match scroll_behavior {
+        ScrollColumnIntoViewport::Always => compute_new_view_offset_viewport_contained(
+            cur_x,
+            view_width,
+            new_col_x,
+            new_col_width,
+            gaps,
+        ),
+        ScrollColumnIntoViewport::AsConfigured => -(new_col_x - cur_x),
+    }
+}
+
+fn compute_new_view_offset_viewport_contained(
     cur_x: f64,
     view_width: f64,
     new_col_x: f64,
